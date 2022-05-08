@@ -349,7 +349,8 @@ void DebugMon_Handler(void)
 
 __attribute__ ((section(".after_vectors")))
 void PendSV_Handler(void)
-{ while(1) {}
+{
+	Pendsv_Handler();
 }
 
 __attribute__ ((section(".after_vectors")))

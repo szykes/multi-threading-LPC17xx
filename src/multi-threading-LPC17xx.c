@@ -114,7 +114,6 @@ void Timer0_Handler(void){
 }
 
 void Systick_Handler(void){
-	static bool not_first;
 
 	//uint32_t ctrl = __get_CONTROL();
 
@@ -128,6 +127,12 @@ void Systick_Handler(void){
 	// __set_CONTROL(CONTROL_STACK_Msk);
 
 	//thread_stack *access_stack = (thread_stack*)(__get_MSP() - sizeof(thread_stack));
+
+	pending_pendsv();
+}
+
+void Pendsv_Handler(void) {
+	static bool not_first;
 
 	if(not_first) {
 		thread_stack *access_stack = (thread_stack*)(__get_PSP());
