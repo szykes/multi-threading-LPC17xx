@@ -78,6 +78,7 @@ WEAK void TIMER0_IRQHandler(void);
 //
 //*****************************************************************************
 void WDT_IRQHandler(void) ALIAS(IntDefaultHandler);
+void TIMER0_IRQHandler(void) ALIAS(IntDefaultHandler);
 void TIMER1_IRQHandler(void) ALIAS(IntDefaultHandler);
 void TIMER2_IRQHandler(void) ALIAS(IntDefaultHandler);
 void TIMER3_IRQHandler(void) ALIAS(IntDefaultHandler);
@@ -349,19 +350,12 @@ void DebugMon_Handler(void)
 
 __attribute__ ((section(".after_vectors")))
 void PendSV_Handler(void)
-{
-	Pendsv_Handler();
+{ while(1) {}
 }
 
 __attribute__ ((section(".after_vectors")))
 void SysTick_Handler(void)
-{
-	Systick_Handler();
-}
-
-__attribute__ ((section(".after_vectors")))
-void TIMER0_IRQHandler(void) {
-	Timer0_Handler();
+{ while(1) {}
 }
 
 //*****************************************************************************

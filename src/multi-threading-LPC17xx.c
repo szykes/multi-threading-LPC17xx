@@ -107,13 +107,17 @@ void toggling_led(void) {
 	}
 }
 
-void Timer0_Handler(void){
+void TIMER0_IRQHandler(void){
 	LPC_TIM0->IR |= (1 << 0);
 
 	toggling_led();
 }
 
-void Systick_Handler(void){
+void HardFault_Handler(void)
+{ while(1) {}
+}
+
+void SysTick_Handler(void){
 
 	//uint32_t ctrl = __get_CONTROL();
 
@@ -131,7 +135,7 @@ void Systick_Handler(void){
 	pending_pendsv();
 }
 
-void Pendsv_Handler(void) {
+void PendSV_Handler(void) {
 	static bool not_first;
 
 	if(not_first) {
