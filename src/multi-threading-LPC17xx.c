@@ -203,23 +203,22 @@ static unsigned int factorial(unsigned int n)
     return n * factorial(n - 1);
 }
 
-void thread1(void) {
+void thread1(uint32_t arg) {
 	// I filled the registers in fill_thread_stack_memory() to verify their contents can survive
 	// a context switch. Yes, they will survive.
 	while(1){
-		int c = factorial(10);
+		int c = factorial(arg);
 		if (c != 3628800){
-			// Executing this will cause HardFault.
-			pending_pendsv();
+			break;
 		}
 	}
 }
 
-void thread2(void) {
+void thread2(uint32_t arg) {
 	while(1){
-		int c = factorial(3);
+		int c = factorial(arg);
 		if (c != 6){
-			pending_pendsv();
+			break;
 		}
 	}
 }
@@ -229,7 +228,7 @@ void del_thread(void) {
 	while (1) {}
 }
 
-static void fill_thread_stack_memory(os_thread *empty_os_thread, void (*thread_ptr)(void)) {
+static void fill_thread_stack_memory(os_thread *empty_os_thread, void (*thread_ptr)(uint32_t), uint32_t arg) {
 	// I hardcoded where the SP can start in the memory map together with the size of memory
 	// for each thread.
 	// Yeah, this is lazy...
@@ -246,6 +245,7 @@ static void fill_thread_stack_memory(os_thread *empty_os_thread, void (*thread_p
 	// The del_thread() will be called, when the thread ends.
 	access_stack->LR = (uint32_t) &del_thread;
 	access_stack->xPSR = DEFAULT_PSR;
+	access_stack->r0 = arg;
 
 	// No need to do anything with the other registers, they will be replaced anyway.
 
@@ -253,7 +253,7 @@ static void fill_thread_stack_memory(os_thread *empty_os_thread, void (*thread_p
 	empty_os_thread->SP = sp - sizeof(thread_stack);
 }
 
-void new_thread(void (*thread_ptr)(void)) {
+void new_thread(void (*thread_ptr)(uint32_t), uint32_t arg) {
 	if(thread_ptr == NULL) {
 		return;
 	}
@@ -273,7 +273,7 @@ void new_thread(void (*thread_ptr)(void)) {
 		return;
 	}
 
-	fill_thread_stack_memory(empty_os_thread, thread_ptr);
+	fill_thread_stack_memory(empty_os_thread, thread_ptr, arg);
 
 	max_threads++;
 
@@ -288,8 +288,8 @@ int main(void) {
 	NVIC_SetPriority(SVCall_IRQn, 0xE0);
 	NVIC_SetPriority(SysTick_IRQn, 0x00);
 
-	new_thread(thread1);
-	new_thread(thread2);
+	new_thread(thread1, 10);
+	new_thread(thread2, 3);
 
 	SysTick_Config(1000);
 
