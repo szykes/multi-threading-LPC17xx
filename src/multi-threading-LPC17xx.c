@@ -95,6 +95,10 @@ static void pending_pendsv(void) {
 	SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
 }
 
+static void pend_svc(void) {
+	__ASM volatile ("svc 0");
+}
+
 static void toggling_led(void) {
 	if (LPC_GPIO0->FIOPIN & (0x1 << 22)) {
 		LPC_GPIO0->FIOCLR |= (0x1 << 22);
@@ -114,19 +118,11 @@ void HardFault_Handler(void)
 }
 
 void SVC_Handler(void) {
-	next_sp = &os_thread_barn[thread_idx].SP;
-}
-
-void SysTick_Handler(void){
-	// SysTick gives the heartbeat for the context switching. However, this handler cannot do the
-	// context switch in real because it would mess up the stacks.
-
 	// The very first running of this handler interrupts the main() function and this SP is useless at
-	// this point. Let's skip it.
+		// this point. Let's skip it.
 	static bool skip_first;
 
 	if(skip_first) {
-
 		previous_sp = &os_thread_barn[thread_idx].SP;
 
 		thread_idx++;
@@ -135,6 +131,22 @@ void SysTick_Handler(void){
 		}
 	} else {
 		skip_first = true;
+	}
+
+	next_sp = &os_thread_barn[thread_idx].SP;
+
+	pending_pendsv();
+}
+
+void SysTick_Handler(void){
+	// SysTick gives the heartbeat for the context switching. However, this handler cannot do the
+	// context switch in real because it would mess up the stacks.
+
+	previous_sp = &os_thread_barn[thread_idx].SP;
+
+	thread_idx++;
+	if(thread_idx >= max_threads){
+		thread_idx = 0;
 	}
 
 	next_sp = &os_thread_barn[thread_idx].SP;
@@ -272,7 +284,8 @@ int main(void) {
 	led_pin_init();
 	timer0_count_init();
 
-	NVIC_SetPriority(PendSV_IRQn, 0xff);
+	NVIC_SetPriority(PendSV_IRQn, 0xFF);
+	NVIC_SetPriority(SVCall_IRQn, 0xE0);
 	NVIC_SetPriority(SysTick_IRQn, 0x00);
 
 	new_thread(thread1);
@@ -282,11 +295,13 @@ int main(void) {
 
 	__enable_irq();
 
+	pend_svc();
+
 	// Using the PSP is recommended here because this is how the PendSV_Handler() can be lightweight.
 	// The PendSV_Handler() uses 'psp' only. If I used MSP here, the PendSV_Handler() would require
 	// a branch for handling MSP once at the first run.
-	__set_PSP(os_thread_barn[thread_idx].SP);
-	__set_CONTROL(CONTROL_THREAD_MODE_Msk | CONTROL_STACK_Msk);
+	//__set_PSP(os_thread_barn[thread_idx].SP);
+	//__set_CONTROL(CONTROL_THREAD_MODE_Msk | CONTROL_STACK_Msk);
 
 	// I cannot start the os_thread execution here because it would override the previously set
 	// link register that points to del_thread(). The new_thread() prepares the stacks of each os_thread.
