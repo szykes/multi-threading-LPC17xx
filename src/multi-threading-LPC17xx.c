@@ -91,7 +91,7 @@ static void disable_systick_irq(void) {
 	SysTick->CTRL &= ~SysTick_CTRL_TICKINT_Msk;
 }
 
-static void pending_pendsv(void) {
+static void pend_pendsv(void) {
 	SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
 }
 
@@ -119,23 +119,26 @@ void HardFault_Handler(void)
 
 void SVC_Handler(void) {
 	// The very first running of this handler interrupts the main() function and this SP is useless at
-		// this point. Let's skip it.
+	// this point. Let's skip it.
 	static bool skip_first;
 
 	if(skip_first) {
-		previous_sp = &os_thread_barn[thread_idx].SP;
-
 		thread_idx++;
 		if(thread_idx >= max_threads){
 			thread_idx = 0;
 		}
+
+		if(max_threads == 0) {
+			previous_sp = &os_thread_barn[thread_idx].SP;
+		}
+
 	} else {
 		skip_first = true;
 	}
 
 	next_sp = &os_thread_barn[thread_idx].SP;
 
-	pending_pendsv();
+	pend_pendsv();
 }
 
 void SysTick_Handler(void){
@@ -151,7 +154,7 @@ void SysTick_Handler(void){
 
 	next_sp = &os_thread_barn[thread_idx].SP;
 
-	pending_pendsv();
+	pend_pendsv();
 }
 
 // The 'naked' removes the compiler added code from this functions. This is important because it can mess
@@ -224,8 +227,22 @@ void thread2(uint32_t arg) {
 }
 
 void del_thread(void) {
-	// thread has ended, do whatever you want here :) for example: pend the SVC to perform context switch.
-	while (1) {}
+	disable_systick_irq();
+
+	int idx;
+	for(idx = thread_idx; idx < (max_threads - 1); idx++) {
+		memcpy(&os_thread_barn[idx], &os_thread_barn[idx + 1], sizeof(os_thread));
+	}
+
+	os_thread_barn[idx].SP = 0;
+
+	max_threads--;
+
+	enable_systick_irq();
+
+	pend_svc();
+
+	while(1) {}
 }
 
 static void fill_thread_stack_memory(os_thread *empty_os_thread, void (*thread_ptr)(uint32_t), uint32_t arg) {
@@ -285,23 +302,23 @@ int main(void) {
 	timer0_count_init();
 
 	NVIC_SetPriority(PendSV_IRQn, 0xFF);
-	NVIC_SetPriority(SVCall_IRQn, 0xE0);
+	NVIC_SetPriority(SVCall_IRQn, 0x00);
 	NVIC_SetPriority(SysTick_IRQn, 0x00);
 
-	new_thread(thread1, 10);
-	new_thread(thread2, 3);
+	new_thread(thread1, 1);//10);
+	new_thread(thread2, 2);//3);
 
 	SysTick_Config(1000);
 
 	__enable_irq();
 
-	pend_svc();
-
 	// Using the PSP is recommended here because this is how the PendSV_Handler() can be lightweight.
 	// The PendSV_Handler() uses 'psp' only. If I used MSP here, the PendSV_Handler() would require
 	// a branch for handling MSP once at the first run.
-	//__set_PSP(os_thread_barn[thread_idx].SP);
+	__set_PSP(os_thread_barn[thread_idx].SP);
 	//__set_CONTROL(CONTROL_THREAD_MODE_Msk | CONTROL_STACK_Msk);
+
+	pend_svc();
 
 	// I cannot start the os_thread execution here because it would override the previously set
 	// link register that points to del_thread(). The new_thread() prepares the stacks of each os_thread.
