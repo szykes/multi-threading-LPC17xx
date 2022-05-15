@@ -118,8 +118,10 @@ void HardFault_Handler(void)
 }
 
 void SVC_Handler(void) {
-	// The very first running of this handler interrupts the main() function and this SP is useless at
-	// this point. Let's skip it.
+	// SVC gives chance to switch context sooner, than SysTick is triggered.
+
+	// The very first running of this handler interrupts the main() and that SP is useless at
+	// this point because I want to run only threads. Let's skip it.
 	static bool skip_first;
 
 	if(skip_first) {
@@ -129,6 +131,7 @@ void SVC_Handler(void) {
 		}
 
 		if(max_threads == 0) {
+			// If no living threads, then execute infinite loop of del_thread().
 			previous_sp = &os_thread_barn[thread_idx].SP;
 		}
 
@@ -143,7 +146,8 @@ void SVC_Handler(void) {
 
 void SysTick_Handler(void){
 	// SysTick gives the heartbeat for the context switching. However, this handler cannot do the
-	// context switch in real because it would mess up the stacks.
+	// context switch in real because if it did the context switch, exiting from SysTick would step in thread mode, but
+	// but this would cause problem in the other active interrupt since it runs in privileged mode.
 
 	previous_sp = &os_thread_barn[thread_idx].SP;
 
@@ -157,20 +161,20 @@ void SysTick_Handler(void){
 	pend_pendsv();
 }
 
-// The 'naked' removes the compiler added code from this functions. This is important because it can mess
+// The 'naked' removes the compiler added code from this handler. This is important because it can mess
 // up the content of registers.
 __attribute__ ((naked))
 void PendSV_Handler(void) {
-	// PendSV has the lowest priority because this should be executed lastly if there are more triggered
+	// PendSV has the lowest priority because this will be executed lastly, if there are more triggered
 	// IRQs.
 
 	__ASM volatile(
 		// Disable interrupt
 		"cpsid i             \n"
 
-		// Store the PSP this was SP of interrupted thread. This threads goes to idle.
+		// Store the PSP, this was the SP of interrupted thread. This threads goes to suspend state.
 		"mrs r0, psp         \n"
-		// Push the R4-R11 registers because they are pushed by the CPU.
+		// Push the R4-R11 registers because they are not pushed by the CPU.
 		"stmdb r0!,{r4-r11}  \n"
 
 		// Store the PSP in the os_thread via the previous_sp.
@@ -185,10 +189,10 @@ void PendSV_Handler(void) {
 
 		// Pop the R4-R11 registers.
 		"ldmia r0!, {r4-r11} \n"
-		// Set the PSP.
+		// Set the PSP of next thread.
 		"msr psp, r0         \n"
 
-		// When the CPU returns to normal execution here we can set how the returning should is processed.
+		// When the CPU returns to normal execution, here we can set how the returning should is processed.
 		// In the current case the normal execution will be in thread mode with PSP.
 		"ldr r0, =0xFFFFFFFD \n"
 
@@ -207,8 +211,6 @@ static unsigned int factorial(unsigned int n)
 }
 
 void thread1(uint32_t arg) {
-	// I filled the registers in fill_thread_stack_memory() to verify their contents can survive
-	// a context switch. Yes, they will survive.
 	while(1){
 		int c = factorial(arg);
 		if (c != 3628800){
@@ -234,12 +236,13 @@ void del_thread(void) {
 		memcpy(&os_thread_barn[idx], &os_thread_barn[idx + 1], sizeof(os_thread));
 	}
 
-	os_thread_barn[idx].SP = 0;
+	os_thread_barn[idx].SP = kEmptyThread;
 
 	max_threads--;
 
 	enable_systick_irq();
 
+	// Do context switch immediately.
 	pend_svc();
 
 	while(1) {}
@@ -255,16 +258,19 @@ static void fill_thread_stack_memory(os_thread *empty_os_thread, void (*thread_p
 	// I need to put the last element of struct at the starting address of stack.
 	thread_stack *access_stack = (thread_stack*)(sp - sizeof(thread_stack));
 
-	// It fills the stack with given values. When the PendSV_Handler() loads the register contents from
+	// This fills the stack with given values. When the PendSV_Handler() loads the register contents from
 	// stack, it will read these. So, this is where I can manipulate how the thread starts.
 	access_stack->PC = (uint32_t) thread_ptr;
 
 	// The del_thread() will be called, when the thread ends.
 	access_stack->LR = (uint32_t) &del_thread;
+
 	access_stack->xPSR = DEFAULT_PSR;
+
+	// The R0 is explicitly used to pass argument to a function by the compilers.
 	access_stack->r0 = arg;
 
-	// No need to do anything with the other registers, they will be replaced anyway.
+	// No need to do anything with the other registers, they will be overridden anyway.
 
 	// The os_thread execution starts with popping the values from stack.
 	empty_os_thread->SP = sp - sizeof(thread_stack);
@@ -305,8 +311,8 @@ int main(void) {
 	NVIC_SetPriority(SVCall_IRQn, 0x00);
 	NVIC_SetPriority(SysTick_IRQn, 0x00);
 
-	new_thread(thread1, 1);//10);
-	new_thread(thread2, 2);//3);
+	new_thread(thread1, 10);
+	new_thread(thread2, 3);
 
 	SysTick_Config(1000);
 
@@ -316,8 +322,8 @@ int main(void) {
 	// The PendSV_Handler() uses 'psp' only. If I used MSP here, the PendSV_Handler() would require
 	// a branch for handling MSP once at the first run.
 	__set_PSP(os_thread_barn[thread_idx].SP);
-	//__set_CONTROL(CONTROL_THREAD_MODE_Msk | CONTROL_STACK_Msk);
 
+	// Let's start to execute the first thread.
 	pend_svc();
 
 	// I cannot start the os_thread execution here because it would override the previously set
